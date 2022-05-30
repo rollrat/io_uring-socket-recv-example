@@ -16,4 +16,4 @@ cc client.c -o client  -Wall -O2 -D_GNU_SOURCE -luring -std=c++11 -lpthread
 
  - Receive data more than buf size (with looping)
    - I cannot found how to do that until now :(
-   - When using socket, we can found the end of receive data from recvfrom's return value 
+   - When using socket, we can found the end of receive data from `recvfrom`'s return value 
