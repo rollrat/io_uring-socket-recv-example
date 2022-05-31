@@ -56,6 +56,7 @@ int add_read_request(int client_socket) {
   struct request *req = malloc(sizeof(*req) + sizeof(struct iovec));
   req->iov[0].iov_base = malloc(READ_SZ);
   req->iov[0].iov_len = READ_SZ;
+  req->iovec_count = 1;
   req->event_type = EVENT_TYPE_READ;
   req->client_socket = client_socket;
   memset(req->iov[0].iov_base, 0, READ_SZ);
@@ -108,7 +109,7 @@ int get_line(const char *src, char *dest, int dest_sz) {
   return 1;
 }
 
-int handle_client_request(struct request *req) {
+int handle_client_request(struct request *req, size_t req_sz) {
   // char http_request[1024];
   /* Get the first line, which will be the request */
   // if(get_line(req->iov[0].iov_base, http_request, sizeof(http_request))) {
@@ -116,7 +117,15 @@ int handle_client_request(struct request *req) {
   //     exit(1);
   // }
   // handle_http_method(http_request, req->client_socket);
+  
+  //
+  // req->iov[0].iov_len is not request length!
+  // that just always return buf size
+  // use req_sz for real request size
+  //
   printf("%d\n", req->iov[0].iov_len);
+  printf("%d\n", req_sz);
+  
   // for (int i = 0; i < 1000; i++)
   //     printf("%d ", ((char *)(req->iov[0].iov_base))[i]);
   // printf("%ld\n", req->iov[0].iov_len);
@@ -195,10 +204,15 @@ int main(int argc, char *argv[]) {
       break;
     case EVENT_TYPE_READ:
       if (!cqe->res) {
+        // end of request
         fprintf(stderr, "Empty request!\n");
+        close(req->client_socket);
         break;
       }
+      // request handler
       handle_client_request(req);
+      // for get check more data!
+      add_read_request(req->client_socket);
       free(req->iov[0].iov_base);
       free(req);
       break;
@@ -213,55 +227,6 @@ int main(int argc, char *argv[]) {
 
     io_uring_cqe_seen(&ring, cqe);
   }
-#else
-  while (1) {
-    io_uring_wait_cqe(&ring, &cqe);
-
-    if (cqe->res < 0) {
-      printf("cqe->res = %d\n", cqe->res);
-      exit(-1);
-    }
-
-    if (cqe->user_data == NULL) {
-      io_uring_cqe_seen(&ring, cqe);
-      continue;
-    }
-
-    struct request *req = (struct request *)cqe->user_data;
-
-    printf("%d\n", req->event_type);
-
-    //
-    // append accept event
-    //
-    add_accept_request(server_socket, &client_addr, &client_addr_len);
-
-    //
-    // receive data
-    //
-    off_t  offset = 0;
-    while (1) {
-      struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
-      if (!sqe)
-        break;
-      struct iovec *iov = (struct iovec*)malloc(sizeof(struct iovec));
-      iov->iov_base = read_buf;
-      iov->iov_len = READ_SZ;
-      memset(iov->iov_base, 0, READ_SZ);
-      /* Linux kernel 5.5 has support for readv, but not for recv() or read() */
-      io_uring_prep_readv(sqe, cqe->res, iov, 1, offset);
-      offset += iov->iov_len;
-    }
-
-    printf("read bytes: %ld\n", offset);
-
-    // io_uring_sqe_set_data(sqe, NULL);
-    io_uring_submit(&ring);
-
-    io_uring_cqe_seen(&ring, cqe);
-    printf("pipe end!\n");
-  }
-#endif
 
   return 0;
 }
